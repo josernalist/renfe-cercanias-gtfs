@@ -159,15 +159,17 @@ def main():
         print("Sin cambios respecto a la descarga anterior. No se escribe CSV.")
         sys.exit(0)
 
-    # Guardar el zip directamente (no extraer, los raw son demasiado grandes)
-    zip_path = os.path.join(out_dir, f"gtfs-{fecha}.zip")
-    with open(zip_path, "wb") as f:
-        f.write(data)
-
     save_hash(out_dir, h)
 
+    # Registrar el cambio en un log
+    log_path = os.path.join(out_dir, "cambios.log")
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(f"{fecha} {h[:16]} {len(data)} bytes\n")
+
     print(f"Fecha     : {fecha}")
-    print(f"ZIP       : {zip_path} ({len(data) / 1024 / 1024:.1f} MB)")
+    print(f"Hash      : {h[:16]}")
+    print(f"Tamano    : {len(data) / 1024 / 1024:.1f} MB")
+    print(f"GTFS actualizado. Descarga manual: {GTFS_URL}")
 
 
 if __name__ == "__main__":
