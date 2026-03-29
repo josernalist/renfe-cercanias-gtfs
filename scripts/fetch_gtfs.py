@@ -22,16 +22,18 @@ GTFS_URL = "https://ssl.renfe.com/ftransit/Fichero_CER_FOMENTO/fomento_transit.z
 
 COLUMNAS = [
     "fecha",
-    "tren",
+    "trip_id",
+    "block_id",
     "codLinea",
-    "nucleo",
-    "sentido",
+    "ruta",
     "cod_origen",
     "estacion_origen",
+    "hora_salida",
     "cod_destino",
     "estacion_destino",
+    "hora_llegada",
     "num_paradas",
-    "paradas",
+    "accesible",
 ]
 
 
@@ -88,54 +90,61 @@ def parse_gtfs(data: bytes) -> list:
         routes     = read("routes.txt")
 
     stop_name  = {s["stop_id"]: s["stop_name"] for s in stops}
-    route_info = {r["route_id"]: r.get("route_short_name", "") for r in routes}
+    route_info = {r["route_id"]: (r.get("route_short_name", ""), r.get("route_long_name", "")) for r in routes}
 
     trip_info = {
         t["trip_id"]: {
-            "tren": t.get("trip_short_name", "").strip(),
+            "block_id": t.get("block_id", ""),
             "route_id": t.get("route_id", ""),
+            "accesible": t.get("wheelchair_accessible", ""),
         }
         for t in trips
     }
 
+    # Agrupar stop_times por trip: solo primera y ultima parada
     from collections import defaultdict
-    trip_stops = defaultdict(list)
+    trip_first_last = {}
     for st in stop_times:
+        tid = st["trip_id"]
         try:
             seq = int(st["stop_sequence"])
         except ValueError:
             seq = 0
-        trip_stops[st["trip_id"]].append((seq, st["stop_id"]))
+        if tid not in trip_first_last:
+            trip_first_last[tid] = {"first": (seq, st), "last": (seq, st), "count": 1}
+        else:
+            entry = trip_first_last[tid]
+            entry["count"] += 1
+            if seq < entry["first"][0]:
+                entry["first"] = (seq, st)
+            if seq > entry["last"][0]:
+                entry["last"] = (seq, st)
 
-    rows = {}
-    for trip_id, stops_list in trip_stops.items():
-        stops_list.sort(key=lambda x: x[0])
+    rows = []
+    for trip_id, fl in trip_first_last.items():
         info = trip_info.get(trip_id, {})
-        tren = info.get("tren", "")
-        if not tren:
-            continue
+        route_id = info.get("route_id", "")
+        linea, ruta = route_info.get(route_id, ("", ""))
 
-        cod_origen  = stops_list[0][1]
-        cod_destino = stops_list[-1][1]
-        key = (tren, cod_origen, cod_destino)
+        first_st = fl["first"][1]
+        last_st = fl["last"][1]
 
-        if key not in rows:
-            linea = route_info.get(info.get("route_id", ""), "")
-            sentido = "Par" if tren.isdigit() and int(tren) % 2 == 0 else "Impar" if tren.isdigit() else ""
-            rows[key] = {
-                "tren":             tren,
-                "codLinea":         linea,
-                "nucleo":           "",
-                "sentido":          sentido,
-                "cod_origen":       cod_origen,
-                "estacion_origen":  stop_name.get(cod_origen, cod_origen),
-                "cod_destino":      cod_destino,
-                "estacion_destino": stop_name.get(cod_destino, cod_destino),
-                "num_paradas":      len(stops_list),
-                "paradas":          " > ".join(stop_name.get(s[1], s[1]) for s in stops_list),
-            }
+        rows.append({
+            "trip_id":          trip_id,
+            "block_id":         info.get("block_id", ""),
+            "codLinea":         linea,
+            "ruta":             ruta.strip(),
+            "cod_origen":       first_st["stop_id"],
+            "estacion_origen":  stop_name.get(first_st["stop_id"], first_st["stop_id"]),
+            "hora_salida":      first_st.get("departure_time", ""),
+            "cod_destino":      last_st["stop_id"],
+            "estacion_destino": stop_name.get(last_st["stop_id"], last_st["stop_id"]),
+            "hora_llegada":     last_st.get("arrival_time", ""),
+            "num_paradas":      fl["count"],
+            "accesible":        info.get("accesible", ""),
+        })
 
-    return sorted(rows.values(), key=lambda r: r["tren"])
+    return sorted(rows, key=lambda r: (r["codLinea"], r["hora_salida"]))
 
 
 def extract_raw(data: bytes, raw_dir: str):
@@ -159,17 +168,25 @@ def main():
         print("Sin cambios respecto a la descarga anterior. No se escribe CSV.")
         sys.exit(0)
 
+    # Extraer CSV resumen: primera y ultima parada de cada tren
+    print("Procesando GTFS...")
+    trayectos = parse_gtfs(data)
+
+    csv_path = os.path.join(out_dir, f"gtfs-{fecha}.csv")
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=COLUMNAS)
+        writer.writeheader()
+        for row in trayectos:
+            writer.writerow({"fecha": fecha, **row})
+
+    # No guardamos archivos raw (trips.txt es 21 MB)
+
     save_hash(out_dir, h)
 
-    # Registrar el cambio en un log
-    log_path = os.path.join(out_dir, "cambios.log")
-    with open(log_path, "a", encoding="utf-8") as f:
-        f.write(f"{fecha} {h[:16]} {len(data)} bytes\n")
-
+    print(f"Guardado  : {csv_path}")
+    print(f"Raw       : {raw_dir}/ (sin stop_times ni shapes)")
     print(f"Fecha     : {fecha}")
-    print(f"Hash      : {h[:16]}")
-    print(f"Tamano    : {len(data) / 1024 / 1024:.1f} MB")
-    print(f"GTFS actualizado. Descarga manual: {GTFS_URL}")
+    print(f"Trayectos : {len(trayectos)}")
 
 
 if __name__ == "__main__":
