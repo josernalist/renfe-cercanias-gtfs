@@ -159,13 +159,15 @@ def main():
         print("Sin cambios respecto a la descarga anterior. No se escribe CSV.")
         sys.exit(0)
 
-    raw_dir = os.path.join(out_dir, f"gtfs-raw-{fecha}")
-    extract_raw(data, raw_dir)
+    # Guardar el zip directamente (no extraer, los raw son demasiado grandes)
+    zip_path = os.path.join(out_dir, f"gtfs-{fecha}.zip")
+    with open(zip_path, "wb") as f:
+        f.write(data)
 
     save_hash(out_dir, h)
 
     print(f"Fecha     : {fecha}")
-    print(f"Archivos raw guardados en {raw_dir}")
+    print(f"ZIP       : {zip_path} ({len(data) / 1024 / 1024:.1f} MB)")
 
 
 if __name__ == "__main__":
