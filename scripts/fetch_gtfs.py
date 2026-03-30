@@ -184,7 +184,6 @@ def main():
     save_hash(out_dir, h)
 
     print(f"Guardado  : {csv_path}")
-    print(f"Raw       : {raw_dir}/ (sin stop_times ni shapes)")
     print(f"Fecha     : {fecha}")
     print(f"Trayectos : {len(trayectos)}")
 
